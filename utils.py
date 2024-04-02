@@ -138,7 +138,7 @@ class DataProcessor:
         variety_scenario_dict = {}
         scenario_prod = dict(zip(self.df_prod['Scénario'], sum_last_37))
         
-        for index, row in scenario_variety_mapping.iterrows():
+        for _, row in scenario_variety_mapping.iterrows():
             scenario = row['Scénario']
             variety = row['variété 23-24']
             if variety not in variety_scenario_dict:
@@ -199,7 +199,7 @@ class DataProcessor:
         scenario_vitesse = {}
         scenario_cv = {}
         
-        for index, row in self.df_chargesvar.iterrows():
+        for _, row in self.df_chargesvar.iterrows():
             scenario = row['Scénario']
             cmo = row["Coûts de Main d'œuvre par kg de production"]
             vitesse = row["Vitesse de main d'œuvre kg/personne/jour"]
@@ -218,7 +218,7 @@ class DataProcessor:
         scenario_mois_dict = {}
         scenario_culture = {}
         scenario_couple={}
-        for index, row in self.df_prod.iterrows():
+        for _, row in self.df_prod.iterrows():
             scenario = row['Scénario']
             delai = row['Délai pour début de production']
             duree = row['Durée de production en semaine']
@@ -242,7 +242,7 @@ class DataProcessor:
     def extract_sim_data(self):
         secteur_serre_dict = {}
         
-        for index, row in self.df_sim.iterrows():
+        for _, row in self.df_sim.iterrows():
             secteur = row['secteur']
             serre = row['serre']
             if secteur not in secteur_serre_dict:
@@ -369,3 +369,5 @@ class DataProcessor:
             }
         df = pd.DataFrame(data)
         return df
+    def biase_data(self):
+        pass

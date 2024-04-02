@@ -4,9 +4,20 @@ from PIL import Image
 import numpy as np
 from model import *
 import plotly.graph_objects as go
-import time  # Importing the time module
+import time
+import os
+import matplotlib.pyplot as plt
+
 
 def main():
+    st.set_page_config(
+            page_title="Portfolio Optimization App",
+            page_icon=":chart_with_upwards_trend:",
+            layout="wide"
+        )
+    
+
+
     st.title("Portfolio Optimization App")
     
     logo = Image.open('logo.png')
@@ -18,18 +29,26 @@ def main():
     # Data extraction feature
     extract_data_input = st.sidebar.radio("Data Extraction", ("No", "Yes"))
     folder_path = "Data"
-    file_path = "Modèle_Belfaa_updated_linearized_1303_simul_noQ.xlsx"
-    
+    file_path = ""
+
     if extract_data_input == "Yes":
-        # Perform data extraction
-        with st.spinner("Performing data extraction..."):
-            extractor = ExcelDataExtractor(file_path, folder_path)
-            extractor.extract_data()
-        st.success("Data extraction complete!")
+        uploaded_file = st.sidebar.file_uploader("Upload your Excel file", type=["xlsx"])
+        if uploaded_file is not None:
+            file_path = os.path.join(folder_path, uploaded_file.name)
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            
+            # Perform data extraction
+            with st.spinner("Performing data extraction..."):
+                extractor = ExcelDataExtractor(file_path, folder_path)
+                extractor.extract_data()
+            st.success("Data extraction complete!")
+        else:
+            st.write("Please upload an Excel file.")
+
     else:
         st.write("Data extraction skipped.")
     
-
     # Continue with the rest of the main function
     data_processor = DataProcessor(folder_path)
     data_processor.get_assets()
@@ -65,48 +84,26 @@ def main():
         CA_placeholder = int(np.round(portfolio_model.CA_expr, 0))
         CMO_placeholder = int(np.round(portfolio_model.CMO_expr, 0))
         CV_placeholder = int(np.round(portfolio_model.CV_expr, 0))
-        # # Display the placeholder values in a table
-        # st.table({
-        #     "Chiffre d'affaires": [CA_placeholder],
-        #     "Cout de main d'oeuvre": [CMO_placeholder],
-        #     "Charges variables": [CV_placeholder]
-        # })
+        
         data = {
-    "Chiffre d'affaires": [CA_placeholder],
-    "Cout de main d'oeuvre": [CMO_placeholder],
-    "Charges variables": [CV_placeholder]
-}
+            "Chiffre d'affaires": [CA_placeholder],
+            "Cout de main d'oeuvre": [CMO_placeholder],
+            "Charges variables": [CV_placeholder]
+        }
 
         df = pd.DataFrame(data)
-        css = """
-  table {
-    border-collapse: collapse;
-    width: 100%; /* Adjust width as needed */
-  }
-  th, td {
-    padding: 8px;
-    text-align: left;
-    border: 1px solid #ddd;
-  }
-  th {
-    background-color: #f1f1f1;
-  }
-  tr:nth-child(even) {
-    background-color: #f2f2f2;
-  }
-"""
-        st.markdown('<style>%s</style>' % css, unsafe_allow_html=True)
+        
         st.table(df)
+        
         # Plot the top scenarios
+                # Use Plotly for interactive scenario plots
         try:
             with st.spinner("Plotting top scenarios..."):
                 simulation_data = portfolio_model.display()
             st.success("Plotting complete!")
-            
             st.dataframe(simulation_data)
         except Exception as e:
             st.error(f"An error occurred: {e}")
-
     # Simulation Widget
     simulate_button = st.sidebar.button("Simulate Portfolio")
 
@@ -149,11 +146,39 @@ def main():
         fig.data[0].on_click(update_selected_point)
         # Display the plot
         st.plotly_chart(fig)
-    
+        
+    robust_optimization = st.sidebar.button("Robust optimization")
+    if robust_optimization:
+        st.write("Here, we will soon add robust optimization")
+        prices_dict = portfolio_model.price
+
+        # Extract items and prices
+        keys = list(prices_dict.keys())
+        price_arrays = list(prices_dict.values())
+
+        # Plot
+                # Display price trends over time
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for key, prices in zip(keys, price_arrays):
+            ax.plot(prices, label=key, linewidth=2)
+        # Customize plot appearance
+        ax.set_xlabel('Time', fontsize=14)
+        ax.set_ylabel('Price', fontsize=14)
+        ax.set_title('Price of Items Over Time', fontsize=16)
+        ax.legend(fontsize=12)
+        ax.grid(True, linestyle='--', alpha=0.7)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        # Display the plot using Streamlit
+        st.pyplot(fig)
+
     # Copyright notice
     st.write("\n\n")
     st.write("Copyright © 2024 Les Domaines. All rights reserved.")
 
-# Run the main function when the script is executed
+
+    # Rest of the code remains the same
+
 if __name__ == "__main__":
+    
     main()
