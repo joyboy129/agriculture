@@ -11,10 +11,23 @@ import matplotlib.pyplot as plt
 
 def main():
     st.set_page_config(
-            page_title="Portfolio Optimization App",
-            page_icon=":chart_with_upwards_trend:",
-            layout="wide"
-        )
+        page_title="Portfolio Optimization App",
+        page_icon=":chart_with_upwards_trend:",
+        layout="wide"
+    )
+
+    # Add custom CSS to set the background color
+    # You can change the shade of green or use any other color you prefer
+    st.markdown(
+        """
+        <style>
+            body {
+                background-color: #6CB15D;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     
 
 
@@ -50,7 +63,8 @@ def main():
         st.write("Data extraction skipped.")
     
     # Continue with the rest of the main function
-    data_processor = DataProcessor(folder_path)
+    premium = st.sidebar.number_input("Premium", min_value=1, value=15, step=1)
+    data_processor = DataProcessor(folder_path,premium)
     data_processor.get_assets()
     
     # Optimization method selection
@@ -88,13 +102,40 @@ def main():
         data = {
             "Chiffre d'affaires": [CA_placeholder],
             "Cout de main d'oeuvre": [CMO_placeholder],
-            "Charges variables": [CV_placeholder]
+            "Charges variables": [CV_placeholder],
+            "Resultat":[CA_placeholder-CMO_placeholder-CV_placeholder]
         }
 
         df = pd.DataFrame(data)
         
         st.table(df)
+        scenario_dict={}
+        for scenario, semaine in zip(portfolio_model.scenario_chosen, portfolio_model.semaines_chosen):
+            if scenario not in scenario_dict:
+                scenario_dict[scenario] = [semaine]
+            else:
+                scenario_dict[scenario].append(semaine)
+
+        data = {
+            "Scenario index": list(set(portfolio_model.scenario_chosen)),
+            "Scenario": [portfolio_model.scenario_couple[i] for i in list(set(portfolio_model.scenario_chosen))],
+            "Mois": [portfolio_model.scenario_mois_dict[i] for i in list(set(portfolio_model.scenario_chosen))],
+            "Semaines": [list(set(scenario_dict[i]))[0] for i in list(set(portfolio_model.scenario_chosen))],
+            "Hectars": [
+    np.dot(
+        [1 if i == portfolio_model.scenario_chosen[value] else 0 for value in range(portfolio_model.num_serre)],
+        np.array(list(portfolio_model.serre_sau_dict.values()))
+    ) 
+    for i in list(set(portfolio_model.scenario_chosen))
+],
+            "Chiffre d'affaire": [portfolio_model.CA_values[j] for j in list(set(portfolio_model.scenario_chosen))],
+             "Marge": [portfolio_model.CA_values[j]-portfolio_model.CV_values[j]-portfolio_model.CMO_values[j] for j in list(set(portfolio_model.scenario_chosen))],
+             "Pourcentage":[int(100*(portfolio_model.CA_values[j]-portfolio_model.CV_values[j]-portfolio_model.CMO_values[j])/portfolio_model.CA_values[j])
+                            for j in list(set(portfolio_model.scenario_chosen))]
+        }
         
+        df2=pd.DataFrame(data)
+        st.table(df2)
         # Plot the top scenarios
                 # Use Plotly for interactive scenario plots
         try:
@@ -105,7 +146,7 @@ def main():
         except Exception as e:
             st.error(f"An error occurred: {e}")
     # Simulation Widget
-    simulate_button = st.sidebar.button("Simulate Portfolio")
+    simulate_button = st.sidebar.button("Top n scenarios")
 
     if simulate_button:
         start_time = time.time()  # Start time of simulation
@@ -146,35 +187,21 @@ def main():
         fig.data[0].on_click(update_selected_point)
         # Display the plot
         st.plotly_chart(fig)
-        
-    robust_optimization = st.sidebar.button("Robust optimization")
-    if robust_optimization:
-        st.write("Here, we will soon add robust optimization")
-        prices_dict = portfolio_model.price
+        icons = ["🥇", "🥈", "🥉"]
 
-        # Extract items and prices
-        keys = list(prices_dict.keys())
-        price_arrays = list(prices_dict.values())
+        # Iterate over the dataframes and display them with rank icons and labels
+        for rank, dataframe in enumerate(portfolio_model.dfs[:3]):  # Considering the top 3 for the podium
+            st.markdown(f"## {icons[rank]}  Rank {rank + 1}")
+            st.table(dataframe)
 
-        # Plot
-                # Display price trends over time
-        fig, ax = plt.subplots(figsize=(10, 6))
-        for key, prices in zip(keys, price_arrays):
-            ax.plot(prices, label=key, linewidth=2)
-        # Customize plot appearance
-        ax.set_xlabel('Time', fontsize=14)
-        ax.set_ylabel('Price', fontsize=14)
-        ax.set_title('Price of Items Over Time', fontsize=16)
-        ax.legend(fontsize=12)
-        ax.grid(True, linestyle='--', alpha=0.7)
-        plt.xticks(fontsize=12)
-        plt.yticks(fontsize=12)
-        # Display the plot using Streamlit
-        st.pyplot(fig)
+        # If there are more than 3 dataframes, display the remaining ones without a rank label
+        if len(portfolio_model.dfs) > 3:
+            for rank, dataframe in enumerate(portfolio_model.dfs[3:]):
+                st.markdown(f"## Rank {rank + 4}")
+                st.table(dataframe)
 
-    # Copyright notice
     st.write("\n\n")
-    st.write("Copyright © 2024 Les Domaines. All rights reserved.")
+    st.write("Copyright © 2024 Les Domaines Agricoles. All rights reserved.")
 
 
     # Rest of the code remains the same

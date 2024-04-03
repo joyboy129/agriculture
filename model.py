@@ -3,10 +3,10 @@ from gurobipy import GRB
 from pulp import *
 from utils import *
 folder_path = "Data"
-
+premium=5
 class PortfolioModelPulp(DataProcessor):
     def __init__(self, data_processor):
-        super().__init__(folder_path) 
+        super().__init__(folder_path,premium) 
         self.__dict__.update(data_processor.__dict__)  # Inherit all variables from DataProcessor
         self.semaines_chosen=None
         self.scenario_chosen=None
@@ -302,7 +302,7 @@ class PortfolioModelPulp(DataProcessor):
 
 class PortfolioModelGurobi(DataProcessor):
     def __init__(self, data_processor):
-        super().__init__(folder_path)  # Initialize the superclass (DataProcessor)
+        super().__init__(folder_path,premium)  # Initialize the superclass (DataProcessor)
         self.__dict__.update(data_processor.__dict__)  # Inherit all variables from DataProcessor
         self.semaines_chosen=None
         self.scenario_chosen=None
@@ -312,6 +312,13 @@ class PortfolioModelGurobi(DataProcessor):
         self.m=None
         self.choices=None
         self.list_obj=None
+        self.semaines_chosen_top=None
+        self.scenario_chosen_top=None
+        self.summary=None
+        self.dfs=[]
+        self.CA_values=None
+        self.CMO_values=None
+        self.CV_values=None
     def optimize_portfolio(self):
         try:
             m = gp.Model("portfolio")
@@ -383,11 +390,36 @@ class PortfolioModelGurobi(DataProcessor):
             CV_expr = gp.quicksum(choices[(i,j,t)] * self.serre_sau_dict[i+1] * self.scenario_cv[j] 
                                   for j in self.scenarios for t in self.month_to_week_indices[self.scenario_mois_dict[j]]
                                   for i in range(self.num_serre))
+            
+            CA_values={}
+            CMO_values={}
+            CV_values={}
+            for j in self.scenarios:
+                CA_values[j]=gp.quicksum(choices[(i,j,t)] * self.prod[(i, j, t)] 
+                                  for i in range(self.num_serre) 
+                                  for t in self.month_to_week_indices[self.scenario_mois_dict[j]])
+                CMO_values[j]=gp.quicksum(choices[(i,j,t)] * self.scenario_prod[j] * self.serre_sau_dict[i+1] * self.scenario_cmo[j] 
+                                   for t in self.month_to_week_indices[self.scenario_mois_dict[j]]
+                                   for i in range(self.num_serre))
+                CV_values[j] = gp.quicksum(choices[(i,j,t)] * self.serre_sau_dict[i+1] * self.scenario_cv[j] 
+                                  for t in self.month_to_week_indices[self.scenario_mois_dict[j]]
+                                  for i in range(self.num_serre))
+            
 
             m.update()
             m.setObjective((CA_expr - CV_expr - CMO_expr), GRB.MAXIMIZE)
             m.write('model.lp')
             m.optimize()
+            dict_CA_values={}
+            dict_CMO_values={}
+            dict_CV_values={}
+            for j in self.scenarios:
+                dict_CA_values[j]=int(np.round(CA_values[j].getValue(),0))
+                dict_CMO_values[j]=int(np.round(CMO_values[j].getValue(),0))
+                dict_CV_values[j]=int(np.round(CV_values[j].getValue(),0))
+            self.CA_values=dict_CA_values
+            self.CMO_values=dict_CMO_values
+            self.CV_values=dict_CV_values
             self.CA_expr=CA_expr.getValue()
             self.CMO_expr=CMO_expr.getValue()
             self.CV_expr=CV_expr.getValue()
@@ -405,12 +437,10 @@ class PortfolioModelGurobi(DataProcessor):
             for i in list_var:
                 scenario_chosen.append(int(i.split("_")[2]))
                 semaines_chosen.append(int(i.split("_")[3]))
+            
             self.semaines_chosen=semaines_chosen
             self.scenario_chosen=scenario_chosen
             
-            
-
-# Initialize a table to store chosen variable names
 # Define the start date  
         except gp.GurobiError as e:
             print(f"Error code {e.errno}: {e}")
@@ -424,17 +454,127 @@ class PortfolioModelGurobi(DataProcessor):
     # Read the MPS file and initialize the model
         m = gp.read('model.lp')
         choices = {v.varName: v for v in m.getVars()}
-        m.optimize()
-        list_obj = [m.ObjVal]
+        print(choices.keys())
     # Print out the keys present in the choices dictionary
         
-    
+        CA_values_top={}
+        CMO_values_top={}
+        CV_values_top={}
+        for j in self.scenarios:
+            CA_values_top[j]=gp.quicksum(choices["choice_"+str(i)+"_"+str(j)+"_"+str(t)] * self.prod[(i, j, t)] 
+                                  for i in range(self.num_serre) 
+                                  for t in self.month_to_week_indices[self.scenario_mois_dict[j]])
+            CMO_values_top[j]=gp.quicksum(choices["choice_"+str(i)+"_"+str(j)+"_"+str(t)] * self.scenario_prod[j] * self.serre_sau_dict[i+1] * self.scenario_cmo[j] 
+                                   for t in self.month_to_week_indices[self.scenario_mois_dict[j]]
+                                   for i in range(self.num_serre))
+            CV_values_top[j] = gp.quicksum(choices["choice_"+str(i)+"_"+str(j)+"_"+str(t)] * self.serre_sau_dict[i+1] * self.scenario_cv[j] 
+                                  for t in self.month_to_week_indices[self.scenario_mois_dict[j]]
+                                  for i in range(self.num_serre))
+            
+
     # Loop for 'n' iterations
+        excel_writer = pd.ExcelWriter(f"top{n}.xlsx", engine='xlsxwriter')
         chosen_variables_table = []
-        for _ in range(n):
+        list_obj=[]
+        for j in range(n):
+            CA_values_top={}
+            CMO_values_top={}
+            CV_values_top={}
+            for j in self.scenarios:
+                CA_values_top[j]=gp.quicksum(choices["choice_"+str(i)+"_"+str(j)+"_"+str(t)] * self.prod[(i, j, t)] 
+                                    for i in range(self.num_serre) 
+                                    for t in self.month_to_week_indices[self.scenario_mois_dict[j]])
+                CMO_values_top[j]=gp.quicksum(choices["choice_"+str(i)+"_"+str(j)+"_"+str(t)] * self.scenario_prod[j] * self.serre_sau_dict[i+1] * self.scenario_cmo[j] 
+                                    for t in self.month_to_week_indices[self.scenario_mois_dict[j]]
+                                    for i in range(self.num_serre))
+                CV_values_top[j] = gp.quicksum(choices["choice_"+str(i)+"_"+str(j)+"_"+str(t)] * self.serre_sau_dict[i+1] * self.scenario_cv[j] 
+                                    for t in self.month_to_week_indices[self.scenario_mois_dict[j]]
+                                    for i in range(self.num_serre))
+                
+            
+            
+    # Loop for 'n' iterations
+            m.optimize()
+            
+            scenario_chosen, semaines_chosen = [], []
+            if m.status == GRB.Status.OPTIMAL:
+                # Get selected variables with value == 1
+                list_var = [v.varName for v in m.getVars() if v.x == 1]
+
+            for i in list_var:
+                scenario_chosen.append(int(i.split("_")[2]))
+                semaines_chosen.append(int(i.split("_")[3]))
+            self.semaines_chosen_top=semaines_chosen
+            self.scenario_chosen_top=scenario_chosen
+            data_dict = self.scenario_variety_mapping.to_dict(orient='records')
+            data_dict = {entry['Scénario']: entry['variété 23-24'] for entry in data_dict}
+
+            data = {
+            "Secteur": list(self.serre_secteur_dict[i] for i in range(1, self.num_serre+1)),
+            "Serre": list(range(1, self.num_serre + 1)),
+            "Sau": list(self.serre_sau_dict.values()),
+            "Scenario_index": self.semaines_chosen_top,
+            "Variété": [data_dict[scenario] for scenario in self.scenario_chosen_top],
+            "Scenario":[self.scenario_couple[i] for i in self.scenario_chosen_top],
+            "Scenario Mois":[get_month_from_week_index(i) for i in self.semaines_chosen_top],
+            "Cout de la main d'oeuvre": [self.scenario_cmo[i] for i in self.scenario_chosen_top],
+            "Cout variables": [self.scenario_cv[i] for i in self.scenario_chosen_top],
+            "Vitesse de récolte": [self.scenario_vitesse[i] for i in self.scenario_chosen_top],
+            
+            "Week of plantation": self.semaines_chosen_top,
+            
+            
+            "Weeks to debut plantation":[self.scenario_delai_dict[i] for i in self.scenario_chosen_top]
+
+            }
+            df = pd.DataFrame(data)
+            sheet_name = f"Top {str(j + 1)} case"
+            df.to_excel(excel_writer, sheet_name=sheet_name, index=False)
+
+                        
+            scenario_dict = {}
+            for scenario, semaine in zip(self.scenario_chosen_top, self.semaines_chosen_top):
+                if scenario not in scenario_dict:
+                    scenario_dict[scenario] = [semaine]
+                else:
+                    scenario_dict[scenario].append(semaine)
+            dict_CA_values={}
+            dict_CMO_values={}
+            dict_CV_values={}
+            for j in self.scenarios:
+                dict_CA_values[j]=int(np.round(CA_values_top[j].getValue(),0))
+                dict_CMO_values[j]=int(np.round(CMO_values_top[j].getValue(),0))
+                dict_CV_values[j]=int(np.round(CV_values_top[j].getValue(),0))
+            print(dict_CA_values)
+            print( list(set(self.scenario_chosen_top)))
+            data = {
+                "Scenario index": list(set(self.scenario_chosen_top)),
+                "Scenario": [self.scenario_couple[i] for i in list(set(self.scenario_chosen_top))],
+                "Mois": [self.scenario_mois_dict[i] for i in list(set(self.scenario_chosen_top))],
+                "Semaines": [list(set(scenario_dict[i])) for i in list(set(self.scenario_chosen_top))],
+                "Hectars": [
+                    np.dot(
+                        [1 if i == self.scenario_chosen_top[value] else 0 for value in range(self.num_serre)],
+                        np.array(list(self.serre_sau_dict.values()))
+                    ) 
+                    for i in list(set(self.scenario_chosen_top))
+                ],
+                 "Chiffre d'affaire": [dict_CA_values[j] for j in list(set(self.scenario_chosen_top))],
+             "Marge": [dict_CA_values[j]-dict_CV_values[j]-dict_CMO_values[j] for j in list(set(self.scenario_chosen_top))],
+             "Pourcentage":[int(100*(dict_CA_values[j]-dict_CV_values[j]-dict_CMO_values[j])/dict_CA_values[j])
+                            for j in list(set(self.scenario_chosen_top))]
+
+            }
+            df=pd.DataFrame(data)
+            self.dfs.append(df)
+                    # Store the objective value
+            list_obj.append(m.ObjVal)
+            
+            
         # Optimize the model
         # Retrieve and store chosen variable names
             chosen_variables = [var_name for var_name, var in choices.items() if var.x == 1]
+            
             chosen_variables_table.append(chosen_variables)
         
         # Add constraints to avoid repeating selections
@@ -442,12 +582,10 @@ class PortfolioModelGurobi(DataProcessor):
         
         # Update and re-optimize the model with added constraints
             m.update()
-            m.optimize()
-        
-        # Store the objective value
-            list_obj.append(m.ObjVal)
+            
         
     # Set the list of objective values
         self.list_obj = list_obj
+        excel_writer.close()
     def robust_optimization(self):
         pass
