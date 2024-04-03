@@ -64,9 +64,10 @@ def main():
     
     # Continue with the rest of the main function
     premium = st.sidebar.number_input("Premium", min_value=1, value=15, step=1)
+    besoin = st.sidebar.number_input("max besoin", min_value=1, value=600, step=1)
     data_processor = DataProcessor(folder_path,premium)
     data_processor.get_assets()
-    
+
     # Optimization method selection
     optimization_method = st.sidebar.radio("Optimization Method", ("Gurobi","Pulp"))
     if optimization_method == "Pulp":
@@ -88,7 +89,7 @@ def main():
     if optimize_button:
         start_time = time.time()  # Start time of optimization
         with st.spinner("Optimizing portfolio..."):
-            portfolio_model.optimize_portfolio()
+            portfolio_model.optimize_portfolio(besoin)
         st.success("Optimization complete!")
         end_time = time.time()  # End time of optimization
         optimization_time = end_time - start_time  # Calculate optimization time
@@ -109,6 +110,24 @@ def main():
         df = pd.DataFrame(data)
         
         st.table(df)
+        main_doeuvre=portfolio_model.maindoeuvre
+        fig = go.Figure()
+
+        # Add trace for the objective values
+        fig.add_trace(go.Scatter(x=list(range(1, 91)), y=list(main_doeuvre),
+                             mode='markers+lines', marker=dict(color='#2a9d8f', size=10),  # Greenish color
+                             hoverinfo='x+y', name='Main doeuvre'))
+
+        # Set layout for the plot
+        fig.update_layout(title='Main doeuvre',
+                          xaxis_title="Semaine",
+                          yaxis_title="Nombre de main doeuvre",
+                          hovermode='closest',
+                          showlegend=True,
+                          plot_bgcolor='rgba(255, 255, 255, 0)',  # Transparent background
+                          paper_bgcolor='rgba(255, 255, 255, 0.5)',  # Semi-transparent paper background
+                          font=dict(color='#264653', size=14))  # Dark green font color
+        st.plotly_chart(fig)
         scenario_dict={}
         for scenario, semaine in zip(portfolio_model.scenario_chosen, portfolio_model.semaines_chosen):
             if scenario not in scenario_dict:
@@ -151,7 +170,7 @@ def main():
     if simulate_button:
         start_time = time.time()  # Start time of simulation
         with st.spinner("Simulating portfolio..."):
-            portfolio_model.get_top_k(n)
+            portfolio_model.get_top_k(n,besoin)
             top_k_data = portfolio_model.list_obj
         st.success("Simulation complete!")
         end_time = time.time()  # End time of simulation

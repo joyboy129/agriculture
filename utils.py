@@ -70,7 +70,7 @@ class ExcelDataExtractor:
         sheet1 = workbook['latest inputs']
         sheet2 = workbook['Indices']
         sheet3 = workbook['Simulation']
-        df_price = self.snap_table(sheet1, 'B10', 91, 4)
+        df_price = self.snap_table(sheet1, 'B10', 91, 3)
         df_prod = self.snap_table(sheet1, 'B17', 45, 16)
         df_chargesvar = self.snap_table(sheet1, 'B38', 8, 16)
         df_plantation = self.snap_table(sheet2, 'J52', 3, 11)
@@ -290,20 +290,23 @@ class DataProcessor:
             for j in self.scenarios:
                 for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
                     if j in self.variety_scenario_dict["Adelita"]:
-                        price_array = np.array(self.price["Adelita"][t-1 + self.scenario_delai_dict[j] :])
+                        price_array = np.array(self.price["Adelita"][t -1+ self.scenario_delai_dict[j] :])
                         prod_mat_array = np.array(prod_mat[self.scenarios.index(j), :])
                         prod[(i, j, t)] = self.serre_sau_dict[i + 1] * self.padded_dot(
                             price_array.reshape(1, -1),
                             prod_mat_array.reshape(1, -1)
-                        )
+                        )[0][0]
                     else:
                         price_array = np.array(self.price[self.scenario_culture[j]][t-1 + self.scenario_delai_dict[j]:])
-                        prod_mat_array = np.array(prod_mat[self.scenarios.index(j), :])
+                        prod_mat_array = np.array(prod_mat[self.scenarios.index(j),:])
                         prod[(i, j, t)] = self.serre_sau_dict[i + 1] * self.padded_dot(
                             price_array.reshape(1, -1),
                             prod_mat_array.reshape(1, -1)
-                        )
-        
+                        )[0][0]
+        t=19
+        j=15
+        price_array = np.array(self.price[self.scenario_culture[j]][t-1 + self.scenario_delai_dict[j]:])
+        prod_mat_array = np.array(prod_mat[self.scenarios.index(j),:])
         self.prod = prod
         self.prod_mat = prod_mat
     def get_assets(self):

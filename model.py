@@ -16,8 +16,9 @@ class PortfolioModelPulp(DataProcessor):
         self.obj=None       
         self.list_obj = None
         self.constraints=[]
+        self.besoin=None
 
-    def optimize_portfolio(self):
+    def optimize_portfolio(self, besoin):
   
         try:
             m = LpProblem("portfolio", LpMaximize)
@@ -71,12 +72,12 @@ class PortfolioModelPulp(DataProcessor):
                                 scenarios_time_dict[j].append(t)
                     else:
                         for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
-                            if t + self.scenario_delai_dict[j] < s and s < t + self.scenario_delai_dict[j] + self.scenario_duree_dict[j] + 1:
+                            if t + self.scenario_delai_dict[j] < s and s < t + self.scenario_delai_dict[j] + 38:
                                 scenarios_time_dict[j].append(t)
                 m += lpSum(choices[(i, k, t)] * (self.serre_sau_dict[i + 1] / self.scenario_vitesse[k]) *
                    self.prod_mat[self.scenarios.index(k), s - t - self.scenario_delai_dict[k] - 1]
                    for k in self.scenarios for t in scenarios_time_dict[k] if scenarios_time_dict[k] != []
-                   for i in range(self.num_serre)) <= 7 * 600
+                   for i in range(self.num_serre)) <= 7 * besoin
 
             CA_expr = lpSum(choices[(i, j, t)] * self.prod[(i, j, t)]
                     for i in range(self.num_serre) for j in self.scenarios
@@ -125,7 +126,7 @@ class PortfolioModelPulp(DataProcessor):
             print(e)
 
 
-    def get_top_k(self, n):
+    def get_top_k(self, n,besoin):
         try:
             m = LpProblem("portfolio", LpMaximize)
             choices = LpVariable.dicts("choice", [(i, j, t) for i in range(self.num_serre)
@@ -182,7 +183,7 @@ class PortfolioModelPulp(DataProcessor):
                 m += lpSum(choices[(i, k, t)] * (self.serre_sau_dict[i + 1] / self.scenario_vitesse[k]) *
                self.prod_mat[self.scenarios.index(k), s - t - self.scenario_delai_dict[k] - 1]
                     for k in self.scenarios for t in scenarios_time_dict[k] if scenarios_time_dict[k] != []
-               for i in range(self.num_serre)) <= 7 * 600
+               for i in range(self.num_serre)) <= 7 * besoin
 
             
             
@@ -265,7 +266,7 @@ class PortfolioModelPulp(DataProcessor):
                     m += lpSum(choices[(i, k, t)] * (self.serre_sau_dict[i + 1] / self.scenario_vitesse[k]) *
                self.prod_mat[self.scenarios.index(k), s - t - self.scenario_delai_dict[k] - 1]
                         for k in self.scenarios for t in scenarios_time_dict[k] if scenarios_time_dict[k] != []
-                for i in range(self.num_serre)) <= 7 * 600
+                for i in range(self.num_serre)) <= 7 * besoin
 
             
             
@@ -319,7 +320,8 @@ class PortfolioModelGurobi(DataProcessor):
         self.CA_values=None
         self.CMO_values=None
         self.CV_values=None
-    def optimize_portfolio(self):
+        self.maindoeuvre=None
+    def optimize_portfolio(self, besoin):
         try:
             m = gp.Model("portfolio")
             choices = {}
@@ -361,23 +363,24 @@ class PortfolioModelGurobi(DataProcessor):
                         for j in self.variety_scenario_dict["LAURITA"]:
                             for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
                                 m.addConstr(choices[(i,j,t)] == 0)
-
+            main_oeuvre={}
             for s in range(1, 91):
                 scenarios_time_dict = {}
                 for j in self.scenarios:
                     scenarios_time_dict[j] = []
-                    if j in [4, 5, 20]:
+                    if j in [4, 5, 15]:
                         for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
                             if t + self.scenario_delai_dict[j] < s and s < t + self.scenario_delai_dict[j] + 38:
                                 scenarios_time_dict[j].append(t)
                     else:
                         for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
-                            if t + self.scenario_delai_dict[j] < s and s < t + self.scenario_delai_dict[j] + self.scenario_duree_dict[j] + 1:
+                            if t + self.scenario_delai_dict[j] < s and s < t + self.scenario_delai_dict[j] + 37 + 1:
                                 scenarios_time_dict[j].append(t)
-                m.addConstr(gp.quicksum(choices[(i,k,t)]*(self.serre_sau_dict[i+1]/self.scenario_vitesse[k]) *
+                main_oeuvre[s]=gp.quicksum(choices[(i,k,t)]*(self.serre_sau_dict[i+1]/self.scenario_vitesse[k]) *
                                          self.prod_mat[self.scenarios.index(k),s-t-self.scenario_delai_dict[k]-1]
                                          for k in self.scenarios for t in scenarios_time_dict[k] if scenarios_time_dict[k]!=[]
-                                         for i in range(self.num_serre)) <= 7*600, f'mo_{s}')
+                                         for i in range(self.num_serre))
+                m.addConstr(main_oeuvre[s] <= 7*besoin, f'mo_{s}')
 
             CA_expr = gp.quicksum(choices[(i,j,t)] * self.prod[(i, j, t)] 
                                   for i in range(self.num_serre) for j in self.scenarios 
@@ -413,16 +416,20 @@ class PortfolioModelGurobi(DataProcessor):
             dict_CA_values={}
             dict_CMO_values={}
             dict_CV_values={}
+            dict_main_doeuvre={}
             for j in self.scenarios:
                 dict_CA_values[j]=int(np.round(CA_values[j].getValue(),0))
                 dict_CMO_values[j]=int(np.round(CMO_values[j].getValue(),0))
                 dict_CV_values[j]=int(np.round(CV_values[j].getValue(),0))
+            for s in range(1,91):
+                dict_main_doeuvre[s]=int(np.round(main_oeuvre[s].getValue()/7,0))
             self.CA_values=dict_CA_values
             self.CMO_values=dict_CMO_values
             self.CV_values=dict_CV_values
             self.CA_expr=CA_expr.getValue()
             self.CMO_expr=CMO_expr.getValue()
             self.CV_expr=CV_expr.getValue()
+            self.maindoeuvre=dict_main_doeuvre.values()
 
             print("Value of CA_expr:", CA_expr.getValue())
             print("Value of CMO_expr:", CMO_expr.getValue())
@@ -447,14 +454,13 @@ class PortfolioModelGurobi(DataProcessor):
         except AttributeError:
             print("Encountered an attribute error")
     
-    def get_top_k(self, n):
+    def get_top_k(self, n,besoin):
     # Initialize a list to store objective values
         
     
     # Read the MPS file and initialize the model
         m = gp.read('model.lp')
         choices = {v.varName: v for v in m.getVars()}
-        print(choices.keys())
     # Print out the keys present in the choices dictionary
         
         CA_values_top={}
@@ -476,7 +482,7 @@ class PortfolioModelGurobi(DataProcessor):
         excel_writer = pd.ExcelWriter(f"top{n}.xlsx", engine='xlsxwriter')
         chosen_variables_table = []
         list_obj=[]
-        for j in range(n):
+        for k in range(n):
             CA_values_top={}
             CMO_values_top={}
             CV_values_top={}
@@ -528,8 +534,8 @@ class PortfolioModelGurobi(DataProcessor):
 
             }
             df = pd.DataFrame(data)
-            sheet_name = f"Top {str(j + 1)} case"
-            df.to_excel(excel_writer, sheet_name=sheet_name, index=False)
+            sheet_name = f"Top {str(k + 1)} case "
+            df.to_excel(excel_writer, sheet_name=sheet_name, index=True)
 
                         
             scenario_dict = {}
@@ -545,13 +551,12 @@ class PortfolioModelGurobi(DataProcessor):
                 dict_CA_values[j]=int(np.round(CA_values_top[j].getValue(),0))
                 dict_CMO_values[j]=int(np.round(CMO_values_top[j].getValue(),0))
                 dict_CV_values[j]=int(np.round(CV_values_top[j].getValue(),0))
-            print(dict_CA_values)
-            print( list(set(self.scenario_chosen_top)))
+            
             data = {
                 "Scenario index": list(set(self.scenario_chosen_top)),
                 "Scenario": [self.scenario_couple[i] for i in list(set(self.scenario_chosen_top))],
                 "Mois": [self.scenario_mois_dict[i] for i in list(set(self.scenario_chosen_top))],
-                "Semaines": [list(set(scenario_dict[i])) for i in list(set(self.scenario_chosen_top))],
+                "Semaines": [', '.join(map(str, list(set(scenario_dict[i])))) for i in list(set(self.scenario_chosen_top))],
                 "Hectars": [
                     np.dot(
                         [1 if i == self.scenario_chosen_top[value] else 0 for value in range(self.num_serre)],
