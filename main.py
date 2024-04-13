@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 from PIL import Image
 import numpy as np
-from model import *
-import plotly.graph_objects as go
-import time
 import os
-import matplotlib.pyplot as plt
-
+from utils import *
+from model import *
+import time
+import plotly.graph_objects as go  # Move this import statement to the beginning
+from tqdm import tqdm
 
 def main():
     st.set_page_config(
@@ -16,23 +16,9 @@ def main():
         layout="wide"
     )
 
-    # Add custom CSS to set the background color
-    # You can change the shade of green or use any other color you prefer
-    st.markdown(
-        """
-        <style>
-            body {
-                background-color: #6CB15D;
-            }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-    
-
-
     st.title("Portfolio Optimization App")
     
+    # Load logo
     logo = Image.open('logo.png')
     st.sidebar.image(logo, width=100)
 
@@ -63,6 +49,7 @@ def main():
         st.write("Data extraction skipped.")
     
     # Continue with the rest of the main function
+
     premium = st.sidebar.number_input("Premium", min_value=1, value=15, step=1)
     besoin = st.sidebar.number_input("max besoin", min_value=1, value=600, step=1)
     data_processor = DataProcessor(folder_path,premium)
@@ -97,14 +84,13 @@ def main():
 
         # Placeholder values for Chiffre d'affaires, Cout de main d'oeuvre, and Charges variables
         CA_placeholder = int(np.round(portfolio_model.CA_expr, 0))
-        CMO_placeholder = int(np.round(portfolio_model.CMO_expr, 0))
+        # CMO_placeholder = int(np.round(portfolio_model.CMO_expr, 0))
         CV_placeholder = int(np.round(portfolio_model.CV_expr, 0))
         
         data = {
             "Chiffre d'affaires": [CA_placeholder],
-            "Cout de main d'oeuvre": [CMO_placeholder],
             "Charges variables": [CV_placeholder],
-            "Resultat":[CA_placeholder-CMO_placeholder-CV_placeholder]
+            "Resultat":[CA_placeholder-CV_placeholder]
         }
 
         df = pd.DataFrame(data)
@@ -114,8 +100,8 @@ def main():
         fig = go.Figure()
 
         # Add trace for the objective values
-        fig.add_trace(go.Scatter(x=list(range(1, 91)), y=list(main_doeuvre),
-                             mode='markers+lines', marker=dict(color='#2a9d8f', size=10),  # Greenish color
+        fig.add_trace(go.Bar(x=list(range(1, 91)), y=list(main_doeuvre),
+                             marker=dict(color='#2a9d8f'),  # Greenish color
                              hoverinfo='x+y', name='Main doeuvre'))
 
         # Set layout for the plot
@@ -141,22 +127,21 @@ def main():
             "Mois": [portfolio_model.scenario_mois_dict[i] for i in list(set(portfolio_model.scenario_chosen))],
             "Semaines": [list(set(scenario_dict[i]))[0] for i in list(set(portfolio_model.scenario_chosen))],
             "Hectars": [
-    np.dot(
+    np.round(np.dot(
         [1 if i == portfolio_model.scenario_chosen[value] else 0 for value in range(portfolio_model.num_serre)],
         np.array(list(portfolio_model.serre_sau_dict.values()))
-    ) 
+    ) ,2)
     for i in list(set(portfolio_model.scenario_chosen))
 ],
             "Chiffre d'affaire": [portfolio_model.CA_values[j] for j in list(set(portfolio_model.scenario_chosen))],
              "Marge": [portfolio_model.CA_values[j]-portfolio_model.CV_values[j]-portfolio_model.CMO_values[j] for j in list(set(portfolio_model.scenario_chosen))],
-             "Pourcentage":[int(100*(portfolio_model.CA_values[j]-portfolio_model.CV_values[j]-portfolio_model.CMO_values[j])/portfolio_model.CA_values[j])
+             "Taux de marge":[int(100*(portfolio_model.CA_values[j]-portfolio_model.CV_values[j]-portfolio_model.CMO_values[j])/portfolio_model.CA_values[j])
                             for j in list(set(portfolio_model.scenario_chosen))]
         }
         
         df2=pd.DataFrame(data)
         st.table(df2)
         # Plot the top scenarios
-                # Use Plotly for interactive scenario plots
         try:
             with st.spinner("Plotting top scenarios..."):
                 simulation_data = portfolio_model.display()
@@ -164,6 +149,7 @@ def main():
             st.dataframe(simulation_data)
         except Exception as e:
             st.error(f"An error occurred: {e}")
+
     # Simulation Widget
     simulate_button = st.sidebar.button("Top n scenarios")
 
@@ -210,21 +196,85 @@ def main():
 
         # Iterate over the dataframes and display them with rank icons and labels
         for rank, dataframe in enumerate(portfolio_model.dfs[:3]):  # Considering the top 3 for the podium
-            st.markdown(f"## {icons[rank]}  Rank {rank + 1}")
+            st.markdown(f"## {icons[rank]}  Rank {rank + 1}: Chiffre d'affaire est "+str("{:,.0f}".format(np.sum(np.array(dataframe["Chiffre d'affaire"].str.replace(',', '').astype(int))))))
+            st.markdown(f'## Marge est: ' +str("{:,.0f}".format(np.sum(np.array(dataframe["Marge"].str.replace(',', '').astype(int))))))
             st.table(dataframe)
 
         # If there are more than 3 dataframes, display the remaining ones without a rank label
         if len(portfolio_model.dfs) > 3:
             for rank, dataframe in enumerate(portfolio_model.dfs[3:]):
                 st.markdown(f"## Rank {rank + 4}")
+                st.markdown(f"## Chiffre d'affaire est "+ str("{:,.0f}".format(np.sum(np.array(dataframe["Chiffre d'affaire"].str.replace(',', '').astype(int))))))
+                st.markdown(f'## Marge est: ' +str("{:,.0f}".format(np.sum(np.array(dataframe["Marge"].str.replace(',', '').astype(int))))))
                 st.table(dataframe)
+
+    # View CSV Files Button
+    view_csv_button = st.sidebar.button("View CSV Files")
+
+    if view_csv_button:
+        csv_files = [file for file in os.listdir(folder_path) if file.endswith('.csv')]
+        for csv_file in csv_files:
+            csv_data = pd.read_csv(os.path.join(folder_path, csv_file))
+            st.write(csv_data)
+    sim = st.sidebar.number_input("Number of simulations", min_value=1, value=100, step=1) 
+    robust_optimization=st.sidebar.button("Robust optimisation ")
+    
+    if robust_optimization:
+        mat = {}
+        occ={}
+        p=1000
+        folder_path_rob = "Data copy"
+        values = {j: [] for j in range(p)}
+        progress_bar = st.progress(0)
+        
+        for i in tqdm(range(sim), desc="Optimizing Portfolio"):
+            random_prices(folder_path_rob,25,100)
+            data_processor_rob = DataProcessor(folder_path_rob, premium)
+            data_processor_rob.get_assets()
+            ###First  approach
+        #     portfolio_model_rob = PortfolioModelGurobi(data_processor_rob)
+        #     portfolio_model_rob.optimize_portfolio(besoin)
+        #     key = portfolio_model_rob.semaines_chosen + portfolio_model_rob.scenario_chosen
+        #     key = tuple(key)
+
+        #     if key not in mat.keys():
+        #         mat[key] = portfolio_model_rob.CA_expr - portfolio_model_rob.CV_expr
+        #         occ[key]=1
+        #     elif mat[key] < portfolio_model_rob.CA_expr - portfolio_model_rob.CV_expr:
+        #         mat[key] = portfolio_model_rob.CA_expr - portfolio_model_rob.CV_expr
+        #         occ[key]+=1
+        #     else:
+        #         occ[key]+=1
+
+        #     # Update the progress bar
+        #     progress_bar.progress((i + 1) / sim)
+
+        # # Output the results in Streamlit
+        # st.write("Results of Portfolio Optimization:")
+        # if mat:
+        #     max_key = max(mat, key=mat.get)
+        #     st.write("Key with maximum value:", max_key)
+        #     semaines_chosen_from_key = [key[i] for i in range(portfolio_model.num_serre)]
+        #     scenario_chosen_from_key = [key[portfolio_model.num_serre + i] for i in range(portfolio_model.num_serre)]
+        #     st.write("Original value:",portfolio_model.marge(scenario_chosen_from_key,semaines_chosen_from_key), "with occurence:",
+        #              occ[max_key])
+
+        # else:
+        #     st.write("No results available.")
+        # SECOND APPROACH
+            scenarios_mat=np.loadtxt("Top/scenario"+str(p)+".csv", delimiter=',')
+            semaines_mat=np.loadtxt("Top/semaines"+str(p)+".csv", delimiter=',')
+            for j in range(p):
+                values[j].append(data_processor_rob.marge(scenarios_mat[j,:], semaines_mat[j,:]))
+            progress_bar.progress((i + 1) / sim)
+        for j in range(p):
+            values[j]=min(values[j])
+        st.write("scenario with maximum value:", max(values, key=values.get)+1)
+        robust_data=portfolio_model.display(loop=False, alternative=True,semaines_chosen=semaines_mat[max(values, key=values.get),:],scenario_chosen=scenarios_mat[max(values, key=values.get),:]  )
+        st.dataframe(robust_data)
 
     st.write("\n\n")
     st.write("Copyright © 2024 Les Domaines Agricoles. All rights reserved.")
 
-
-    # Rest of the code remains the same
-
 if __name__ == "__main__":
-    
     main()

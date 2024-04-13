@@ -74,7 +74,7 @@ class ExcelDataExtractor:
         df_prod = self.snap_table(sheet1, 'B17', 45, 16)
         df_chargesvar = self.snap_table(sheet1, 'B38', 8, 16)
         df_plantation = self.snap_table(sheet2, 'J52', 3, 11)
-        df_month_index = self.snap_table(sheet2, 'L3', 3, 25)
+        # df_month_index = self.snap_table(sheet2, 'L3', 2, 25)
         df_sim = self.snap_table(sheet3, 'B22', 3, 25)
 
           # Default folder path
@@ -85,7 +85,7 @@ class ExcelDataExtractor:
         df_chargesvar.to_csv(os.path.join(self.folder_path, "Charges_var.csv"), index=False)
         df_prod.to_csv(os.path.join(self.folder_path, "Production.csv"), index=False)
         df_plantation.to_csv(os.path.join(self.folder_path, "plantation.csv"), index=False)
-        df_month_index.to_csv(os.path.join(self.folder_path, "month_index.csv"), index=False)
+        # df_month_index.to_csv(os.path.join(self.folder_path, "month_index.csv"), index=False)
         df_sim.to_csv(os.path.join(self.folder_path, "Simulation.csv"), index=False)
 
         print(f"DataFrames saved to folder: {self.folder_path}")
@@ -97,7 +97,7 @@ class DataProcessor:
         self.df_chargesvar = None
         self.df_prod = None
         self.df_plantation = None
-        self.df_month_index = None
+        # self.df_month_index = None
         self.df_sim = None
         
         self.variety_scenario_dict = None
@@ -128,7 +128,7 @@ class DataProcessor:
         self.df_chargesvar = pd.read_csv(os.path.join(self.folder_path, "Charges_var.csv"))
         self.df_prod = pd.read_csv(os.path.join(self.folder_path, "Production.csv")).fillna(0)
         self.df_plantation = pd.read_csv(os.path.join(self.folder_path, "plantation.csv"))
-        self.df_month_index = pd.read_csv(os.path.join(self.folder_path, "month_index.csv"))
+        # self.df_month_index = pd.read_csv(os.path.join(self.folder_path, "month_index.csv"))
         self.df_sim = pd.read_csv(os.path.join(self.folder_path, "Simulation.csv"))
         
     def get_dict(self):
@@ -303,10 +303,6 @@ class DataProcessor:
                             price_array.reshape(1, -1),
                             prod_mat_array.reshape(1, -1)
                         )[0][0]
-        t=19
-        j=15
-        price_array = np.array(self.price[self.scenario_culture[j]][t-1 + self.scenario_delai_dict[j]:])
-        prod_mat_array = np.array(prod_mat[self.scenarios.index(j),:])
         self.prod = prod
         self.prod_mat = prod_mat
     def get_assets(self):
@@ -319,8 +315,16 @@ class DataProcessor:
         self.extract_price_data()
         self.other_data()
         self.compute_tensor()
-    def display(self):
-        
+    def display(self, loop=False, alternative = False, semaines_chosen=[],scenario_chosen=[]):
+        if not alternative:
+
+            if loop:
+                scenario_chosen=self.scenario_chosen_top
+                semaines_chosen=self.semaines_chosen_top
+            else:
+                semaines_chosen=self.semaines_chosen
+                scenario_chosen=self.scenario_chosen
+
         data_dict = self.scenario_variety_mapping.to_dict(orient='records')
         data_dict = {entry['Scénario']: entry['variété 23-24'] for entry in data_dict}
 
@@ -328,23 +332,59 @@ class DataProcessor:
             "Secteur": list(self.serre_secteur_dict[i] for i in range(1, self.num_serre+1)),
             "Serre": list(range(1, self.num_serre + 1)),
             "Sau": list(self.serre_sau_dict.values()),
-            "Scenario_index": self.scenario_chosen,
-            "Variété": [data_dict[scenario] for scenario in self.scenario_chosen],
-            "Scenario":[self.scenario_couple[i] for i in self.scenario_chosen],
-            "Scenario Mois":[get_month_from_week_index(i) for i in self.semaines_chosen],
-            "Cout de la main d'oeuvre": [self.scenario_cmo[i] for i in self.scenario_chosen],
-            "Cout variables": [self.scenario_cv[i] for i in self.scenario_chosen],
-            "Vitesse de récolte": [self.scenario_vitesse[i] for i in self.scenario_chosen],
+            "Scenario_index": scenario_chosen,
+            "Variété": [data_dict[scenario] for scenario in scenario_chosen],
+            "Scenario":[self.scenario_couple[i] for i in scenario_chosen],
+            "Scenario Mois":[get_month_from_week_index(i) for i in semaines_chosen],
             
-            "Week of plantation": self.semaines_chosen,
+            "Cout variables": [self.scenario_cv[i] for i in scenario_chosen],
+            "Vitesse de récolte": [self.scenario_vitesse[i] for i in scenario_chosen],
+            
+            "Week of plantation": semaines_chosen,
             
             
-            "Weeks to debut plantation":[self.scenario_delai_dict[i] for i in self.scenario_chosen]
+            "Weeks to debut plantation":[self.scenario_delai_dict[i] for i in scenario_chosen]
 
             }
         df = pd.DataFrame(data)
         return df
+    def summarize(self, dict_CA_values,dict_CMO_values,dict_CV_values,scenario_dict):
+
+        data = {
+                "Scenario index": list(set(self.scenario_chosen_top)),
+                "Scenario": [self.scenario_couple[i] for i in list(set(self.scenario_chosen_top))],
+                "Mois": [self.scenario_mois_dict[i] for i in list(set(self.scenario_chosen_top))],
+                "Semaines": [', '.join(map(str, list(set(scenario_dict[i])))) for i in list(set(self.scenario_chosen_top))],
+                "Hectars": [
+                    int(100*np.dot(
+                        [1 if i == self.scenario_chosen_top[value] else 0 for value in range(self.num_serre)],
+                        np.array(list(self.serre_sau_dict.values()))
+                    ))/100
+                    for i in list(set(self.scenario_chosen_top))
+                ],
+                 "Chiffre d'affaire": ["{:,.0f}".format(dict_CA_values[j]) for j in list(set(self.scenario_chosen_top))],
+             "Marge": ["{:,.0f}".format(dict_CA_values[j]-dict_CV_values[j]-dict_CMO_values[j]) for j in list(set(self.scenario_chosen_top))],
+             "Taux de marge":[int(100*(dict_CA_values[j]-dict_CV_values[j]-dict_CMO_values[j])/dict_CA_values[j])
+                            for j in list(set(self.scenario_chosen_top))]
+
+            }
+        df=pd.DataFrame(data)
+        return df
     
+    def marge(self,scenario_chosen, semaines_chosen):
+        CA=sum([self.prod[(i, j, t)] 
+                                    for i,j,t in zip(range(self.num_serre), scenario_chosen, semaines_chosen)
+                               
+                                     ])
+        CV=sum([self.serre_sau_dict[i+1] * self.scenario_cv[j] 
+                                     for i,j in zip(range(self.num_serre), scenario_chosen)])
+        return CA-CV
+        
+
+
+
+
+
 start_date = datetime(2024, 1, 1)
 
 # Dictionary of French month names
@@ -373,3 +413,27 @@ def get_month_from_week_index(week_index):
     month_name = french_months[month_index]
 
     return month_name
+def random_prices(path,min, max):
+    index = np.arange(1, 91)
+    data = {
+    'Framboise': np.random.uniform(min, max, size=90),
+    'Mure': np.random.uniform(min, max, size=90)
+}
+
+# Replace values from 1 to 19 with the provided values
+    data['Framboise'][:19] = [
+    49.315889816078794, 51.3279931628088, 54.42024927724581, 57.58244703692335, 59.502598332442545,
+    58.544193838681565, 58.51125324477548, 59.380443622929086, 61.00327865668225, 60.952787393320286,
+    60.171619735606356, 57.37187363319658, 55.81035497912603, 48.79385843044139, 43.21042621437749,
+    43.6494762927753, 37.6814863923284, 34.66737695883439, 29.881550874132962
+]
+    data['Mure'][:19] = [
+    75.0, 75.0, 75.0, 74.0, 74.0, 68.82271963729504, 53.89713681841958, 45.87490940587012,
+    56.59155775366881, 59.3818470376119, 62.355749216862904, 65.62231522026549, 65.35340883617472,
+    58.51812703133646, 58.8288348738439, 59.46145612165989, 57.009992985823544, 51.345258383513055,
+    51.98029609778864
+]
+
+# Create DataFrame
+    df = pd.DataFrame(data, index=index).transpose()
+    df.to_csv(path+"\Prices.csv")
