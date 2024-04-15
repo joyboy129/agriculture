@@ -15,6 +15,20 @@ class ExcelDataExtractor:
     def __init__(self, file_path,folder_path ):
         self.file_path = file_path
         self.folder_path= folder_path
+    def concat_and_sort(df):
+        grouped_df = df[df['secteur'] != 5].groupby('secteur')['SAU(ha)'].sum()
+        df_from_grouped = grouped_df.reset_index()
+        df_from_grouped.columns = ['secteur', 'SAU(ha)']
+        
+        df2 = df[df['secteur'] == 5][["secteur","SAU(ha)"]]
+        df2.reset_index(drop=True, inplace=True)
+        
+        concatenated_df = pd.concat([df_from_grouped, df2])
+        sorted_df = concatenated_df.sort_values(by='secteur')
+        sorted_df.reset_index(drop=True, inplace=True)
+        sorted_df["serre"]=[i for i in range(1,8)]
+        return sorted_df
+
 
     def get_next_code(self, code):
         '''
@@ -86,8 +100,11 @@ class ExcelDataExtractor:
         df_prod.to_csv(os.path.join(self.folder_path, "Production.csv"), index=False)
         df_plantation.to_csv(os.path.join(self.folder_path, "plantation.csv"), index=False)
         # df_month_index.to_csv(os.path.join(self.folder_path, "month_index.csv"), index=False)
-        df_sim.to_csv(os.path.join(self.folder_path, "Simulation.csv"), index=False)
-
+        
+        # df_sim.to_csv(os.path.join(self.folder_path, "Simulation.csv"), index=False)
+        df_sim_bis=self.concat_and_sort(df_sim)
+        df_sim_bis.to_csv(os.path.join(self.folder_path+" copy", "Simulation.csv"), index=False)
+        df_sim_bis.to_csv(os.path.join(self.folder_path, "Simulation.csv"), index=False)
         print(f"DataFrames saved to folder: {self.folder_path}")
 class DataProcessor:
     def __init__(self, folder_path, premium):
@@ -380,7 +397,6 @@ class DataProcessor:
                                      for i,j in zip(range(self.num_serre), scenario_chosen)])
         return CA-CV
         
-
 
 
 

@@ -334,13 +334,19 @@ class PortfolioModelGurobi(DataProcessor):
                 m.addConstr(gp.quicksum(choices[(i, j, t)] for j in self.scenarios 
                                         for t in self.month_to_week_indices[self.scenario_mois_dict[j]]) == 1, f"constraint_{i}")
 
-            for i in range(self.num_sect):
-                ref = self.secteur_serre_dict[i+1][0]
-                for j in self.secteur_serre_dict[i+1]:
-                    for k in self.scenarios:
-                        for t in self.month_to_week_indices[self.scenario_mois_dict[k]]:
-                            m.addConstr(choices[(j-1,k,t)] == choices[(ref-1,k,t)], f'c_0_{j}_{k}_{t}')
-
+            # for i in range(self.num_sect):
+            #     ref = self.secteur_serre_dict[i+1][0]
+            #     for j in self.secteur_serre_dict[i+1]:
+            #         for k in self.scenarios:
+            #             for t in self.month_to_week_indices[self.scenario_mois_dict[k]]:
+            #                 m.addConstr(choices[(j-1,k,t)] == choices[(ref-1,k,t)], f'c_0_{j}_{k}_{t}')
+            # Replaced with relaxed one
+            i=4
+            ref = self.secteur_serre_dict[i+1][0]
+            for j in self.secteur_serre_dict[i+1]:
+                for k in self.scenarios:
+                    for t in self.month_to_week_indices[self.scenario_mois_dict[k]]:
+                        m.addConstr(choices[(j-1,k,t)] == choices[(ref-1,k,t)], f'c_0_{j}_{k}_{t}')
             for i in range(1,self.num_serre+1):
                 if i not in self.secteur_serre_dict[6]:
                     for t in self.month_to_week_indices[self.scenario_mois_dict[5]]:

@@ -209,20 +209,14 @@ def main():
                 st.table(dataframe)
 
     # View CSV Files Button
-    view_csv_button = st.sidebar.button("View CSV Files")
-
-    if view_csv_button:
-        csv_files = [file for file in os.listdir(folder_path) if file.endswith('.csv')]
-        for csv_file in csv_files:
-            csv_data = pd.read_csv(os.path.join(folder_path, csv_file))
-            st.write(csv_data)
+    
     sim = st.sidebar.number_input("Number of simulations", min_value=1, value=100, step=1) 
-    robust_optimization=st.sidebar.button("Robust optimisation ")
+    robust_optimization=st.sidebar.button("Robust optimisation:  approche 1")
     
     if robust_optimization:
         mat = {}
         occ={}
-        p=1000
+        p=110
         folder_path_rob = "Data copy"
         values = {j: [] for j in range(p)}
         progress_bar = st.progress(0)
@@ -232,36 +226,63 @@ def main():
             data_processor_rob = DataProcessor(folder_path_rob, premium)
             data_processor_rob.get_assets()
             ###First  approach
-        #     portfolio_model_rob = PortfolioModelGurobi(data_processor_rob)
-        #     portfolio_model_rob.optimize_portfolio(besoin)
-        #     key = portfolio_model_rob.semaines_chosen + portfolio_model_rob.scenario_chosen
-        #     key = tuple(key)
+            portfolio_model_rob = PortfolioModelGurobi(data_processor_rob)
+            portfolio_model_rob.optimize_portfolio(besoin)
+            key = portfolio_model_rob.semaines_chosen + portfolio_model_rob.scenario_chosen
+            key = tuple(key)
 
-        #     if key not in mat.keys():
-        #         mat[key] = portfolio_model_rob.CA_expr - portfolio_model_rob.CV_expr
-        #         occ[key]=1
-        #     elif mat[key] < portfolio_model_rob.CA_expr - portfolio_model_rob.CV_expr:
-        #         mat[key] = portfolio_model_rob.CA_expr - portfolio_model_rob.CV_expr
-        #         occ[key]+=1
-        #     else:
-        #         occ[key]+=1
+            if key not in mat.keys():
+                mat[key] = portfolio_model_rob.CA_expr - portfolio_model_rob.CV_expr
+                occ[key]=1
+            elif mat[key] < portfolio_model_rob.CA_expr - portfolio_model_rob.CV_expr:
+                mat[key] = portfolio_model_rob.CA_expr - portfolio_model_rob.CV_expr
+                occ[key]+=1
+            else:
+                occ[key]+=1
 
-        #     # Update the progress bar
-        #     progress_bar.progress((i + 1) / sim)
+            # Update the progress bar
+            progress_bar.progress((i + 1) / sim)
 
-        # # Output the results in Streamlit
-        # st.write("Results of Portfolio Optimization:")
-        # if mat:
-        #     max_key = max(mat, key=mat.get)
-        #     st.write("Key with maximum value:", max_key)
-        #     semaines_chosen_from_key = [key[i] for i in range(portfolio_model.num_serre)]
-        #     scenario_chosen_from_key = [key[portfolio_model.num_serre + i] for i in range(portfolio_model.num_serre)]
-        #     st.write("Original value:",portfolio_model.marge(scenario_chosen_from_key,semaines_chosen_from_key), "with occurence:",
-        #              occ[max_key])
+        # Output the results in Streamlit
+        st.write("Results of Portfolio Optimization:")
+        if mat:
+            max_key = max(mat, key=mat.get)
+            robust_data=portfolio_model.display(loop=False, alternative=True,semaines_chosen=max_key[:portfolio_model.num_serre],scenario_chosen=max_key[portfolio_model.num_serre:] )
+            # robust_data.drop(columns=['serre'])
+            st.dataframe(robust_data)
+            semaines_chosen_from_key = [key[i] for i in range(portfolio_model.num_serre)]
+            scenario_chosen_from_key = [key[portfolio_model.num_serre + i] for i in range(portfolio_model.num_serre)]
+            st.write("Original value:",portfolio_model.marge(scenario_chosen_from_key,semaines_chosen_from_key), "with occurence:",
+                     occ[max_key])
 
-        # else:
-        #     st.write("No results available.")
+        else:
+            st.write("No results available.")
         # SECOND APPROACH
+        #     scenarios_mat=np.loadtxt("Top/scenario"+str(p)+".csv", delimiter=',')
+        #     semaines_mat=np.loadtxt("Top/semaines"+str(p)+".csv", delimiter=',')
+        #     for j in range(p):
+        #         values[j].append(data_processor_rob.marge(scenarios_mat[j,:], semaines_mat[j,:]))
+        #     progress_bar.progress((i + 1) / sim)
+        # for j in range(p):
+        #     values[j]=min(values[j])
+        # st.write("scenario with maximum value:", max(values, key=values.get)+1)
+        # robust_data=portfolio_model.display(loop=False, alternative=True,semaines_chosen=semaines_mat[max(values, key=values.get),:],scenario_chosen=scenarios_mat[max(values, key=values.get),:]  )
+        # st.dataframe(robust_data)
+        # st.write("Original Value is", str(int(portfolio_model.marge(scenarios_mat[max(values, key=values.get),:],semaines_mat[max(values, key=values.get),:]))))
+    robust_optimization2=st.sidebar.button("Robust optimisation:  approche 2")
+    if robust_optimization2:
+        mat = {}
+        occ={}
+        p=110
+        folder_path_rob = "Data copy"
+        values = {j: [] for j in range(p)}
+        progress_bar = st.progress(0)
+        
+        for i in tqdm(range(sim), desc="Optimizing Portfolio"):
+            random_prices(folder_path_rob,25,100)
+            data_processor_rob = DataProcessor(folder_path_rob, premium)
+            data_processor_rob.get_assets()
+            ###First  approach
             scenarios_mat=np.loadtxt("Top/scenario"+str(p)+".csv", delimiter=',')
             semaines_mat=np.loadtxt("Top/semaines"+str(p)+".csv", delimiter=',')
             for j in range(p):
@@ -272,7 +293,15 @@ def main():
         st.write("scenario with maximum value:", max(values, key=values.get)+1)
         robust_data=portfolio_model.display(loop=False, alternative=True,semaines_chosen=semaines_mat[max(values, key=values.get),:],scenario_chosen=scenarios_mat[max(values, key=values.get),:]  )
         st.dataframe(robust_data)
+        st.write("Original Value is", str(int(portfolio_model.marge(scenarios_mat[max(values, key=values.get),:],semaines_mat[max(values, key=values.get),:]))))
 
+    view_csv_button = st.sidebar.button("View CSV Files")
+
+    if view_csv_button:
+        csv_files = [file for file in os.listdir(folder_path) if file.endswith('.csv')]
+        for csv_file in csv_files:
+            csv_data = pd.read_csv(os.path.join(folder_path, csv_file))
+            st.write(csv_data)
     st.write("\n\n")
     st.write("Copyright © 2024 Les Domaines Agricoles. All rights reserved.")
 
