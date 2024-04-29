@@ -9,18 +9,12 @@ from openpyxl import load_workbook
 import pandas as pd
 import os
 import re
-
-
-class ExcelDataExtractor:
-    def __init__(self, file_path,folder_path ):
-        self.file_path = file_path
-        self.folder_path= folder_path
-    def concat_and_sort(df):
-        grouped_df = df[df['secteur'] != 5].groupby('secteur')['SAU(ha)'].sum()
+def concat_and_sort(x):
+        grouped_df = x[x['secteur'] != 5].groupby('secteur')['SAU(ha)'].sum()
         df_from_grouped = grouped_df.reset_index()
         df_from_grouped.columns = ['secteur', 'SAU(ha)']
         
-        df2 = df[df['secteur'] == 5][["secteur","SAU(ha)"]]
+        df2 = x[x['secteur'] == 5][["secteur","SAU(ha)"]]
         df2.reset_index(drop=True, inplace=True)
         
         concatenated_df = pd.concat([df_from_grouped, df2])
@@ -28,6 +22,11 @@ class ExcelDataExtractor:
         sorted_df.reset_index(drop=True, inplace=True)
         sorted_df["serre"]=[i for i in range(1,8)]
         return sorted_df
+class ExcelDataExtractor:
+    def __init__(self, file_path,folder_path ):
+        self.file_path = file_path
+        self.folder_path= folder_path
+    
 
 
     def get_next_code(self, code):
@@ -99,12 +98,14 @@ class ExcelDataExtractor:
         df_chargesvar.to_csv(os.path.join(self.folder_path, "Charges_var.csv"), index=False)
         df_prod.to_csv(os.path.join(self.folder_path, "Production.csv"), index=False)
         df_plantation.to_csv(os.path.join(self.folder_path, "plantation.csv"), index=False)
-        # df_month_index.to_csv(os.path.join(self.folder_path, "month_index.csv"), index=False)
-        
-        # df_sim.to_csv(os.path.join(self.folder_path, "Simulation.csv"), index=False)
-        df_sim_bis=self.concat_and_sort(df_sim)
-        df_sim_bis.to_csv(os.path.join(self.folder_path+" copy", "Simulation.csv"), index=False)
+        df_sim_bis=concat_and_sort(df_sim)
         df_sim_bis.to_csv(os.path.join(self.folder_path, "Simulation.csv"), index=False)
+        df_price.to_csv(os.path.join(self.folder_path + " copy", "Prices.csv"), index=False)
+        df_chargesvar.to_csv(os.path.join(self.folder_path + " copy", "Charges_var.csv"), index=False)
+        df_prod.to_csv(os.path.join(self.folder_path + " copy", "Production.csv"), index=False)
+        df_plantation.to_csv(os.path.join(self.folder_path + " copy", "plantation.csv"), index=False)
+        df_sim_bis.to_csv(os.path.join(self.folder_path + " copy", "Simulation.csv"), index=False)
+
         print(f"DataFrames saved to folder: {self.folder_path}")
 class DataProcessor:
     def __init__(self, folder_path, premium):
@@ -116,7 +117,7 @@ class DataProcessor:
         self.df_plantation = None
         # self.df_month_index = None
         self.df_sim = None
-        
+        self.counts=None
         self.variety_scenario_dict = None
         self.scenario_variety_mapping = None
         self.serre_sau_dict = None
@@ -277,10 +278,16 @@ class DataProcessor:
         price = {}
         price["Framboise"] = np.array(self.df_price.iloc[0, 1:])
         price["Mure"] = np.array(self.df_price.iloc[1, 1:])
-        multiplier = np.array([1 if price["Framboise"][i] > 0 else 0 for i in range(len(price["Framboise"]))])
+        multiplier =(price["Framboise"] > 0).astype(int)
         price["Adelita"] =price["Framboise"]+multiplier*self.premium
         self.price = price
-    
+    def filter_elements_less_than(self,array, horizon):
+        filtered_array = [x for x in array if x <= horizon]
+        return filtered_array
+    def filter_elements_more_than(self,array, horizon):
+        filtered_array = [x for x in array if x > horizon]
+        return filtered_array
+
     def other_data(self):
         scenarios = list(self.scenario_culture.keys())
         num_serre = self.df_sim.shape[0]
@@ -289,7 +296,32 @@ class DataProcessor:
         self.scenarios = scenarios
         self.num_serre = num_serre
         self.num_sect = num_sect
-    
+        counts={}
+        for i in range(num_serre):
+            s=0
+            if i+1 in self.secteur_serre_dict[5]:
+                for j in scenarios:
+                    if j not in [4,5]:
+                        if j in self.variety_scenario_dict["Clara"] or j  in self.variety_scenario_dict["LAURITA"]:
+                            if self.serre_sau_dict[i+1] < 2.87:
+                                for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                                    s+=1
+                        else:
+                            for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                                s+=1
+            elif i+1 in self.secteur_serre_dict[6]:
+                for j in scenarios:
+                    if j not in self.variety_scenario_dict["Clara"] and j not in self.variety_scenario_dict["LAURITA"]:
+                        for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                            s+=1
+            else:
+                for j in scenarios:
+                    if j not in [4,5] and j not in self.variety_scenario_dict["Clara"] and j not in self.variety_scenario_dict["LAURITA"]:
+                        for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                            s+=1 
+            counts[i]=s    
+        self.counts=counts
+
     def padded_dot(self, a, b):
         len_a = a.shape[1]
         len_b = b.shape[1]
@@ -329,6 +361,19 @@ class DataProcessor:
         self.extract_scenario_charges()
         self.extract_scenario_production()
         self.extract_sim_data()
+        self.extract_price_data()
+        self.other_data()
+        self.compute_tensor()
+    def get_random_price(self, folder_path_rob,sim):
+        self.folder_path=folder_path_rob
+        self.get_data()
+        self.get_dict()
+        self.month_week_dict()
+        self.extract_scenario_charges()
+        self.extract_scenario_production()
+        self.extract_sim_data()
+        random_prices(folder_path_rob,sim)
+        self.get_data()
         self.extract_price_data()
         self.other_data()
         self.compute_tensor()
@@ -429,27 +474,37 @@ def get_month_from_week_index(week_index):
     month_name = french_months[month_index]
 
     return month_name
-def random_prices(path,min, max):
+def random_prices(path,i):
     index = np.arange(1, 91)
-    data = {
-    'Framboise': np.random.uniform(min, max, size=90),
-    'Mure': np.random.uniform(min, max, size=90)
-}
+    
 
 # Replace values from 1 to 19 with the provided values
-    data['Framboise'][:19] = [
-    49.315889816078794, 51.3279931628088, 54.42024927724581, 57.58244703692335, 59.502598332442545,
-    58.544193838681565, 58.51125324477548, 59.380443622929086, 61.00327865668225, 60.952787393320286,
-    60.171619735606356, 57.37187363319658, 55.81035497912603, 48.79385843044139, 43.21042621437749,
-    43.6494762927753, 37.6814863923284, 34.66737695883439, 29.881550874132962
-]
-    data['Mure'][:19] = [
-    75.0, 75.0, 75.0, 74.0, 74.0, 68.82271963729504, 53.89713681841958, 45.87490940587012,
-    56.59155775366881, 59.3818470376119, 62.355749216862904, 65.62231522026549, 65.35340883617472,
-    58.51812703133646, 58.8288348738439, 59.46145612165989, 57.009992985823544, 51.345258383513055,
-    51.98029609778864
-]
-
+#     L1= np.array([
+#     49.315889816078794, 51.3279931628088, 54.42024927724581, 57.58244703692335, 59.502598332442545,
+#     58.544193838681565, 58.51125324477548, 59.380443622929086, 61.00327865668225, 60.952787393320286,
+#     60.171619735606356, 57.37187363319658, 55.81035497912603, 48.79385843044139, 43.21042621437749,
+#     43.6494762927753, 37.6814863923284, 34.66737695883439, 29.881550874132962, 29.881550874132962
+# ])
+#     L2 = np.array([
+#     75.0, 75.0, 75.0, 74.0, 74.0, 68.82271963729504, 53.89713681841958, 45.87490940587012,
+#     56.59155775366881, 59.3818470376119, 62.355749216862904, 65.62231522026549, 65.35340883617472,
+#     58.51812703133646, 58.8288348738439, 59.46145612165989, 57.009992985823544, 51.345258383513055,
+#     51.98029609778864,51.98029609778864
+# ])
+    mat1=np.load("forecast_prices_framboise.npy")
+    mat2=np.load("forecast_prices_mure.npy")
+    mat1[mat1 < 0] = 0
+    mat2[mat2 < 0] = 0
+    l1_bis=mat1[:,i]
+    l2_bis=mat2[:,i]
+    
+    L11=np.squeeze(l1_bis)
+   
+    L22=np.squeeze(l2_bis)
+    data = {
+    'Framboise':L11,
+    'Mure':L22
+}
 # Create DataFrame
     df = pd.DataFrame(data, index=index).transpose()
     df.to_csv(path+"\Prices.csv")

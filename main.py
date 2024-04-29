@@ -6,8 +6,7 @@ import os
 from utils import *
 from model import *
 import time
-import plotly.graph_objects as go  # Move this import statement to the beginning
-from tqdm import tqdm
+import plotly.graph_objects as go 
 
 def main():
     st.set_page_config(
@@ -28,12 +27,10 @@ def main():
     # Data extraction feature
     extract_data_input = st.sidebar.radio("Data Extraction", ("No", "Yes"))
     folder_path = "Data"
-    file_path = ""
-
     if extract_data_input == "Yes":
         uploaded_file = st.sidebar.file_uploader("Upload your Excel file", type=["xlsx"])
         if uploaded_file is not None:
-            file_path = os.path.join(folder_path, uploaded_file.name)
+            file_path = os.path.abspath(os.path.join(folder_path, uploaded_file.name))
             with open(file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
             
@@ -51,12 +48,14 @@ def main():
     # Continue with the rest of the main function
 
     premium = st.sidebar.number_input("Premium", min_value=1, value=15, step=1)
-    besoin = st.sidebar.number_input("max besoin", min_value=1, value=600, step=1)
+    besoin = st.sidebar.number_input("Maximum de besoin en main d'oeuvre", min_value=1, value=600, step=1)
+    alpha = st.sidebar.number_input("Penalty", min_value=0, value=0, step=1)
     data_processor = DataProcessor(folder_path,premium)
     data_processor.get_assets()
 
     # Optimization method selection
-    optimization_method = st.sidebar.radio("Optimization Method", ("Gurobi","Pulp"))
+    # optimization_method = st.sidebar.radio("Optimization Method", ("Gurobi","Pulp"))
+    optimization_method="Gurobi"
     if optimization_method == "Pulp":
         with st.spinner("Using Pulp for optimization..."):
             portfolio_model = PortfolioModelPulp(data_processor)
@@ -68,15 +67,16 @@ def main():
     else:
         st.error("Invalid optimization method. Please choose between 'Pulp' and 'Gurobi'.")
         return
-    n = st.sidebar.number_input("Top Scenarios (n)", min_value=1, value=3, step=1)
+    optimize_button = st.sidebar.button("Optimize Portfolio")
+    n = st.sidebar.number_input("Top Scenarios en terme de marge", min_value=1, value=3, step=1)
 
     # Optimization Button
-    optimize_button = st.sidebar.button("Optimize Portfolio")
+    
 
     if optimize_button:
         start_time = time.time()  # Start time of optimization
         with st.spinner("Optimizing portfolio..."):
-            portfolio_model.optimize_portfolio(besoin)
+            portfolio_model.optimize_portfolio(besoin,alpha)
         st.success("Optimization complete!")
         end_time = time.time()  # End time of optimization
         optimization_time = end_time - start_time  # Calculate optimization time
@@ -102,12 +102,12 @@ def main():
         # Add trace for the objective values
         fig.add_trace(go.Bar(x=list(range(1, 91)), y=list(main_doeuvre),
                              marker=dict(color='#2a9d8f'),  # Greenish color
-                             hoverinfo='x+y', name='Main doeuvre'))
+                             hoverinfo='x+y', name='Main d\'oeuvre'))
 
         # Set layout for the plot
-        fig.update_layout(title='Main doeuvre',
+        fig.update_layout(title='Main d\'oeuvre',
                           xaxis_title="Semaine",
-                          yaxis_title="Nombre de main doeuvre",
+                          yaxis_title="Nombre de main d'oeuvre",
                           hovermode='closest',
                           showlegend=True,
                           plot_bgcolor='rgba(255, 255, 255, 0)',  # Transparent background
@@ -149,6 +149,7 @@ def main():
             st.dataframe(simulation_data)
         except Exception as e:
             st.error(f"An error occurred: {e}")
+    
 
     # Simulation Widget
     simulate_button = st.sidebar.button("Top n scenarios")
@@ -156,7 +157,7 @@ def main():
     if simulate_button:
         start_time = time.time()  # Start time of simulation
         with st.spinner("Simulating portfolio..."):
-            portfolio_model.get_top_k(n,besoin)
+            portfolio_model.get_top_k(n,besoin,alpha)
             top_k_data = portfolio_model.list_obj
         st.success("Simulation complete!")
         end_time = time.time()  # End time of simulation
@@ -208,92 +209,16 @@ def main():
                 st.markdown(f'## Marge est: ' +str("{:,.0f}".format(np.sum(np.array(dataframe["Marge"].str.replace(',', '').astype(int))))))
                 st.table(dataframe)
 
-    # View CSV Files Button
     
     sim = st.sidebar.number_input("Number of simulations", min_value=1, value=100, step=1) 
-    robust_optimization=st.sidebar.button("Robust optimisation:  approche 1")
-    
+    robust_optimization=st.sidebar.button("Robust optimisation")
+    folder_path_rob = "Data copy"
     if robust_optimization:
-        mat = {}
-        occ={}
-        p=110
-        folder_path_rob = "Data copy"
-        values = {j: [] for j in range(p)}
-        progress_bar = st.progress(0)
-        
-        for i in tqdm(range(sim), desc="Optimizing Portfolio"):
-            random_prices(folder_path_rob,25,100)
-            data_processor_rob = DataProcessor(folder_path_rob, premium)
-            data_processor_rob.get_assets()
-            ###First  approach
-            portfolio_model_rob = PortfolioModelGurobi(data_processor_rob)
-            portfolio_model_rob.optimize_portfolio(besoin)
-            key = portfolio_model_rob.semaines_chosen + portfolio_model_rob.scenario_chosen
-            key = tuple(key)
+        portfolio_model.robust_optimisation(sim,besoin,folder_path_rob)
 
-            if key not in mat.keys():
-                mat[key] = portfolio_model_rob.CA_expr - portfolio_model_rob.CV_expr
-                occ[key]=1
-            elif mat[key] < portfolio_model_rob.CA_expr - portfolio_model_rob.CV_expr:
-                mat[key] = portfolio_model_rob.CA_expr - portfolio_model_rob.CV_expr
-                occ[key]+=1
-            else:
-                occ[key]+=1
-
-            # Update the progress bar
-            progress_bar.progress((i + 1) / sim)
-
-        # Output the results in Streamlit
-        st.write("Results of Portfolio Optimization:")
-        if mat:
-            max_key = max(mat, key=mat.get)
-            robust_data=portfolio_model.display(loop=False, alternative=True,semaines_chosen=max_key[:portfolio_model.num_serre],scenario_chosen=max_key[portfolio_model.num_serre:] )
-            # robust_data.drop(columns=['serre'])
-            st.dataframe(robust_data)
-            semaines_chosen_from_key = [key[i] for i in range(portfolio_model.num_serre)]
-            scenario_chosen_from_key = [key[portfolio_model.num_serre + i] for i in range(portfolio_model.num_serre)]
-            st.write("Original value:",portfolio_model.marge(scenario_chosen_from_key,semaines_chosen_from_key), "with occurence:",
-                     occ[max_key])
-
-        else:
-            st.write("No results available.")
-        # SECOND APPROACH
-        #     scenarios_mat=np.loadtxt("Top/scenario"+str(p)+".csv", delimiter=',')
-        #     semaines_mat=np.loadtxt("Top/semaines"+str(p)+".csv", delimiter=',')
-        #     for j in range(p):
-        #         values[j].append(data_processor_rob.marge(scenarios_mat[j,:], semaines_mat[j,:]))
-        #     progress_bar.progress((i + 1) / sim)
-        # for j in range(p):
-        #     values[j]=min(values[j])
-        # st.write("scenario with maximum value:", max(values, key=values.get)+1)
-        # robust_data=portfolio_model.display(loop=False, alternative=True,semaines_chosen=semaines_mat[max(values, key=values.get),:],scenario_chosen=scenarios_mat[max(values, key=values.get),:]  )
-        # st.dataframe(robust_data)
-        # st.write("Original Value is", str(int(portfolio_model.marge(scenarios_mat[max(values, key=values.get),:],semaines_mat[max(values, key=values.get),:]))))
-    robust_optimization2=st.sidebar.button("Robust optimisation:  approche 2")
-    if robust_optimization2:
-        mat = {}
-        occ={}
-        p=110
-        folder_path_rob = "Data copy"
-        values = {j: [] for j in range(p)}
-        progress_bar = st.progress(0)
-        
-        for i in tqdm(range(sim), desc="Optimizing Portfolio"):
-            random_prices(folder_path_rob,25,100)
-            data_processor_rob = DataProcessor(folder_path_rob, premium)
-            data_processor_rob.get_assets()
-            ###First  approach
-            scenarios_mat=np.loadtxt("Top/scenario"+str(p)+".csv", delimiter=',')
-            semaines_mat=np.loadtxt("Top/semaines"+str(p)+".csv", delimiter=',')
-            for j in range(p):
-                values[j].append(data_processor_rob.marge(scenarios_mat[j,:], semaines_mat[j,:]))
-            progress_bar.progress((i + 1) / sim)
-        for j in range(p):
-            values[j]=min(values[j])
-        st.write("scenario with maximum value:", max(values, key=values.get)+1)
-        robust_data=portfolio_model.display(loop=False, alternative=True,semaines_chosen=semaines_mat[max(values, key=values.get),:],scenario_chosen=scenarios_mat[max(values, key=values.get),:]  )
-        st.dataframe(robust_data)
-        st.write("Original Value is", str(int(portfolio_model.marge(scenarios_mat[max(values, key=values.get),:],semaines_mat[max(values, key=values.get),:]))))
+    stochastic_optimisation=st.sidebar.button("stochastic optimisation")
+    if stochastic_optimisation:
+        portfolio_model.stochastic_optimisation(sim,besoin,folder_path_rob)
 
     view_csv_button = st.sidebar.button("View CSV Files")
 

@@ -4,7 +4,7 @@ from pulp import *
 from utils import *
 import numpy as np
 import streamlit as st
-
+from tqdm import tqdm
 folder_path = "Data"
 premium=15
 class PortfolioModelPulp(DataProcessor):
@@ -321,7 +321,7 @@ class PortfolioModelGurobi(DataProcessor):
         self.CMO_values=None
         self.CV_values=None
         self.maindoeuvre=None
-    def optimize_portfolio(self, besoin):
+    def optimize_portfolio(self, besoin, alpha=100):
         try:
             m = gp.Model("portfolio")
             choices = {}
@@ -355,7 +355,7 @@ class PortfolioModelGurobi(DataProcessor):
                         m.addConstr(choices[(i-1,4,t)] == 0)
                 
             for i in range(self.num_serre):
-                if i-1 not in self.secteur_serre_dict[5]:
+                if i+1 not in self.secteur_serre_dict[5]:
                     for j in self.variety_scenario_dict["Clara"]:
                         for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
                             m.addConstr(choices[(i,j,t)] == 0)
@@ -371,6 +371,7 @@ class PortfolioModelGurobi(DataProcessor):
                             for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
                                 m.addConstr(choices[(i,j,t)] == 0)
             main_oeuvre={}
+            gradient_main_oeuvre={}
             for s in range(1, 91):
                 scenarios_time_dict = {}
                 for j in self.scenarios:
@@ -388,7 +389,22 @@ class PortfolioModelGurobi(DataProcessor):
                                          for k in self.scenarios for t in scenarios_time_dict[k] if scenarios_time_dict[k]!=[]
                                          for i in range(self.num_serre))
                 m.addConstr(main_oeuvre[s] <= 7*besoin, f'mo_{s}')
+            for s in range(2,91):
+                gradient_main_oeuvre[s] = m.addVar(name=f"gradient_main_oeuvre_{s}")
+            hessian={}
+            for s in range(2,91):
+                hessian[s]=m.addVar(name=f"hessian_main_oeuvre_{s}")
 
+            # Define the absolute value constraints
+            for s in range(2,91):
+                m.addConstr(gradient_main_oeuvre[s] >= main_oeuvre[s] - main_oeuvre[s - 1], name=f"abs_constraint_{s}_1")
+                m.addConstr(gradient_main_oeuvre[s] >= main_oeuvre[s - 1] - main_oeuvre[s], name=f"abs_constraint_{s}_2")
+            for s in range(2,90):
+                m.addConstr(hessian[s] >=  main_oeuvre[s+1]-2* main_oeuvre[s]+ main_oeuvre[s-1], name=f"abs_constraint_{s}_1")
+                m.addConstr(hessian[s] >= -main_oeuvre[s+1]+2* main_oeuvre[s]- main_oeuvre[s-1], name=f"abs_constraint_{s}_2")
+
+            # tot_grad=gp.quicksum(gradient_main_oeuvre[s] for s in range(2,91))
+            tot_grad=gp.quicksum(hessian[s] for s in range(3,91))
             CA_expr = gp.quicksum(choices[(i,j,t)] * self.prod[(i, j, t)] 
                                   for i in range(self.num_serre) for j in self.scenarios 
                                   for t in self.month_to_week_indices[self.scenario_mois_dict[j]])
@@ -413,7 +429,7 @@ class PortfolioModelGurobi(DataProcessor):
             
 
             m.update()
-            m.setObjective((CA_expr - CV_expr ), GRB.MAXIMIZE)
+            m.setObjective((CA_expr - CV_expr -alpha*tot_grad), GRB.MAXIMIZE)
             m.write('model.lp')
             m.optimize()
             dict_CA_values={}
@@ -445,8 +461,11 @@ class PortfolioModelGurobi(DataProcessor):
                 list_var = [v.varName for v in m.getVars() if v.x == 1]
 
             for i in list_var:
-                scenario_chosen.append(int(i.split("_")[2]))
-                semaines_chosen.append(int(i.split("_")[3]))
+                if i[:6]=="choice":
+                    scenario_chosen.append(int(i.split("_")[2]))
+                    semaines_chosen.append(int(i.split("_")[3]))
+
+                
             
             self.semaines_chosen=semaines_chosen
             self.scenario_chosen=scenario_chosen
@@ -456,15 +475,16 @@ class PortfolioModelGurobi(DataProcessor):
             print(f"Error code {e.errno}: {e}")
         except AttributeError:
             print("Encountered an attribute error")
-    def light_optimize_portfolio(self, besoin):
-        pass
-    def get_top_k(self, n,besoin):
+
+
+    def get_top_k(self, n,besoin,alpha):
     # Initialize a list to store objective values
         
     
     # Read the MPS file and initialize the model
-        self.optimize_portfolio(besoin)
+        self.optimize_portfolio(besoin,alpha)
         m = gp.read('model.lp')
+        
         choices = {v.varName: v for v in m.getVars()}
     # Print out the keys present in the choices dictionary
         
@@ -491,7 +511,7 @@ class PortfolioModelGurobi(DataProcessor):
             excel_writer = pd.ExcelWriter(f"Top/top{n}.xlsx", engine='xlsxwriter')
             chosen_variables_table = []
             list_obj=[]
-            for k in range(n):
+            for k in tqdm(range(n)):
                 CA_values_top={}
                 CMO_values_top={}
                 CV_values_top={}
@@ -518,8 +538,10 @@ class PortfolioModelGurobi(DataProcessor):
                     list_var = [v.varName for v in m.getVars() if v.x == 1]
 
                 for i in list_var:
-                    scenario_chosen.append(int(i.split("_")[2]))
-                    semaines_chosen.append(int(i.split("_")[3]))
+                    if i[:6]=="choice":
+                        scenario_chosen.append(int(i.split("_")[2]))
+                        semaines_chosen.append(int(i.split("_")[3]))
+
                 self.semaines_chosen_top=semaines_chosen
                 self.scenario_chosen_top=scenario_chosen
                 df=self.display(True)
@@ -542,7 +564,7 @@ class PortfolioModelGurobi(DataProcessor):
                     df=self.summarize(dict_CA_values,dict_CMO_values,dict_CV_values,scenario_dict)
                     self.dfs.append(df)
                         # Store the objective value
-                list_obj.append(m.ObjVal)
+                list_obj.append(self.marge(scenario_chosen, semaines_chosen))
                 
                 
             # Optimize the model
@@ -567,7 +589,7 @@ class PortfolioModelGurobi(DataProcessor):
             list_obj=[]
             scenario_chosen_top_mat=[]
             semaines_chosen_top_mat=[]
-            for k in range(n):
+            for k in tqdm(range(n)):
                 CA_values_top={}
                 CMO_values_top={}
                 CV_values_top={}
@@ -639,4 +661,208 @@ class PortfolioModelGurobi(DataProcessor):
             semaines_chosen_top_mat=np.array(semaines_chosen_top_mat)  
             np.savetxt("Top/semaines"+str(n)+".csv", semaines_chosen_top_mat, delimiter=',', fmt='%g')
             np.savetxt("Top/scenario"+str(n)+".csv", scenario_chosen_top_mat, delimiter=',', fmt='%g')
-    
+    def robust_optimisation(self,n, besoin,folder_path_rob):
+        try:
+            m = gp.Model("portfolio_robust")
+            choices = {}
+            for sim in range(n):
+                for i in range(self.num_serre):
+                    for j in self.scenarios:
+                        for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                            choices[(i, j, t,sim)] = m.addVar(vtype=GRB.BINARY, name=f'choice_{i}_{j}_{t}_{sim}')
+
+            for i in range(self.num_serre):
+                
+                m.addConstr(gp.quicksum(choices[(i, j, t,0)] for j in self.scenarios 
+                                            for t in self.month_to_week_indices[self.scenario_mois_dict[j]]) == 1, f"constraint_{i}")
+
+            for sim in range(1,n):
+                for i in range(self.num_serre):
+                    for j in self.scenarios:
+                        for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                           m.addConstr(choices[(i, j, t,sim)]==choices[(i, j, t,0)]) 
+            
+            ref = self.secteur_serre_dict[5][0]
+            for j in self.secteur_serre_dict[5]:
+                for k in self.scenarios:
+                    for t in self.month_to_week_indices[self.scenario_mois_dict[k]]:
+                        m.addConstr(choices[(j-1,k,t,0)] == choices[(ref-1,k,t,0)], f'c_0_{j}_{k}_{t}')
+            for i in range(1,self.num_serre+1):
+                if i not in self.secteur_serre_dict[6]:
+                    for t in self.month_to_week_indices[self.scenario_mois_dict[5]]:
+                        m.addConstr(choices[(i-1,5,t,0)] == 0)
+                    for t in self.month_to_week_indices[self.scenario_mois_dict[4]]:
+                        m.addConstr(choices[(i-1,4,t,0)] == 0)
+                
+            for i in range(self.num_serre):
+                if i+1 not in self.secteur_serre_dict[5]:
+                    for j in self.variety_scenario_dict["Clara"]:
+                        for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                            m.addConstr(choices[(i,j,t,0)] == 0)
+                    for j in self.variety_scenario_dict["LAURITA"]:
+                        for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                            m.addConstr(choices[(i,j,t,0)] == 0)
+                else:
+                    if self.serre_sau_dict[i+1] > 2.87:
+                        for j in self.variety_scenario_dict["Clara"]:
+                            for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                                m.addConstr(choices[(i,j,t,0)] == 0)
+                        for j in self.variety_scenario_dict["LAURITA"]:
+                            for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                                m.addConstr(choices[(i,j,t,0)] == 0)
+            main_oeuvre={}
+            for s in range(1, 91):
+                scenarios_time_dict = {}
+                for j in self.scenarios:
+                    scenarios_time_dict[j] = []
+                    
+                    for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                        if t + self.scenario_delai_dict[j] < s and s < t + self.scenario_delai_dict[j] + 38:
+                            scenarios_time_dict[j].append(t)
+                
+                main_oeuvre[s]=gp.quicksum(choices[(i,k,t,0)]*(self.serre_sau_dict[i+1]/self.scenario_vitesse[k]) *
+                                         self.prod_mat[self.scenarios.index(k),s-t-self.scenario_delai_dict[k]-1]
+                                         for k in self.scenarios for t in scenarios_time_dict[k] if scenarios_time_dict[k]!=[]
+                                         for i in range(self.num_serre))
+                m.addConstr(main_oeuvre[s] <= 7*besoin, f'mo_{s}')
+            marge=m.addVar(vtype=GRB.CONTINUOUS,name="Objective")
+            m.setObjective(marge, GRB.MAXIMIZE)
+            
+            for s in range(n):
+                self.get_random_price(folder_path_rob,s)
+                m.addConstr(marge<=gp.quicksum(choices[(i,j,t,s)] * (self.prod[(i, j, t)] -self.serre_sau_dict[i+1] * self.scenario_cv[j])
+                                    for i in range(self.num_serre) for j in self.scenarios 
+                                    for t in self.month_to_week_indices[self.scenario_mois_dict[j]]))
+            m.update()            
+            m.optimize()
+            self.get_assets()
+            
+           
+            print(f"Value of robust solution: {m.ObjVal:g}")
+            # Your optimization code here, accessing variables inherited from DataProcessor
+            scenario_chosen, semaines_chosen = [], []
+            if m.status == GRB.Status.OPTIMAL:
+                # Get selected variables with value == 1
+                list_var = [v.varName for v in m.getVars() if v.x == 1]
+
+            for i in list_var:
+                if int(i.split("_")[4])==0:
+                    scenario_chosen.append(int(i.split("_")[2]))
+                    semaines_chosen.append(int(i.split("_")[3]))
+            
+            print(scenario_chosen)
+            print(semaines_chosen)
+
+            
+# Define the start date  
+        except gp.GurobiError as e:
+            print(f"Error code {e.errno}: {e}")
+        except AttributeError as e:
+            print(e)
+            print("Encountered an attribute error")
+    def stochastic_optimisation(self,n, besoin,folder_path_rob):
+        try:
+            m = gp.Model("portfolio_stoch")
+            choices = {}
+            for sim in range(n):
+                for i in range(self.num_serre):
+                    for j in self.scenarios:
+                        for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                            choices[(i, j, t,sim)] = m.addVar(vtype=GRB.BINARY, name=f'choice_{i}_{j}_{t}_{sim}')
+
+            for i in range(self.num_serre):
+                
+                m.addConstr(gp.quicksum(choices[(i, j, t,0)] for j in self.scenarios 
+                                            for t in self.month_to_week_indices[self.scenario_mois_dict[j]]) == 1, f"constraint_{i}_{sim}")
+
+            for sim in range(1,n):
+                for i in range(self.num_serre):
+                    for j in self.scenarios:
+                        for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                           m.addConstr(choices[(i, j, t,sim)]==choices[(i, j, t,0)]) 
+            
+            ref = self.secteur_serre_dict[5][0]
+            for j in self.secteur_serre_dict[5]:
+                for k in self.scenarios:
+                    for t in self.month_to_week_indices[self.scenario_mois_dict[k]]:
+                        m.addConstr(choices[(j-1,k,t,0)] == choices[(ref-1,k,t,0)], f'c_0_{j}_{k}_{t}')
+            for i in range(1,self.num_serre+1):
+                if i not in self.secteur_serre_dict[6]:
+                    for t in self.month_to_week_indices[self.scenario_mois_dict[5]]:
+                        m.addConstr(choices[(i-1,5,t,0)] == 0)
+                    for t in self.month_to_week_indices[self.scenario_mois_dict[4]]:
+                        m.addConstr(choices[(i-1,4,t,0)] == 0)
+                
+            for i in range(self.num_serre):
+                if i+1 not in self.secteur_serre_dict[5]:
+                    for j in self.variety_scenario_dict["Clara"]:
+                        for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                            m.addConstr(choices[(i,j,t,0)] == 0)
+                    for j in self.variety_scenario_dict["LAURITA"]:
+                        for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                            m.addConstr(choices[(i,j,t,0)] == 0)
+                else:
+                    if self.serre_sau_dict[i+1] > 2.87:
+                        for j in self.variety_scenario_dict["Clara"]:
+                            for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                                m.addConstr(choices[(i,j,t,0)] == 0)
+                        for j in self.variety_scenario_dict["LAURITA"]:
+                            for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                                m.addConstr(choices[(i,j,t,0)] == 0)
+            main_oeuvre={}
+            for s in range(1, 91):
+                scenarios_time_dict = {}
+                for j in self.scenarios:
+                    scenarios_time_dict[j] = []
+                    if j in [4, 5, 15]:
+                        for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                            if t + self.scenario_delai_dict[j] < s and s < t + self.scenario_delai_dict[j] + 38:
+                                scenarios_time_dict[j].append(t)
+                    else:
+                        for t in self.month_to_week_indices[self.scenario_mois_dict[j]]:
+                            if t + self.scenario_delai_dict[j] < s and s < t + self.scenario_delai_dict[j] + 37 + 1:
+                                scenarios_time_dict[j].append(t)
+                main_oeuvre[s]=gp.quicksum(choices[(i,k,t,0)]*(self.serre_sau_dict[i+1]/self.scenario_vitesse[k]) *
+                                         self.prod_mat[self.scenarios.index(k),s-t-self.scenario_delai_dict[k]-1]
+                                         for k in self.scenarios for t in scenarios_time_dict[k] if scenarios_time_dict[k]!=[]
+                                         for i in range(self.num_serre))
+                m.addConstr(main_oeuvre[s] <= 7*besoin, f'mo_{s}')
+            obj=m.addVar(vtype=GRB.CONTINUOUS,name="Objective")
+            CA_expr,CV_expr={},{}
+            for sim in range(n):
+                self.get_random_price(folder_path_rob,sim)
+                CA_expr[sim] = gp.quicksum(choices[(i,j,t,0)] * self.prod[(i, j, t)] 
+                                    for i in range(self.num_serre) for j in self.scenarios 
+                                    for t in self.month_to_week_indices[self.scenario_mois_dict[j]])
+                CV_expr[sim] = gp.quicksum(choices[(i,j,t,0)] * self.serre_sau_dict[i+1] * self.scenario_cv[j] 
+                                    for j in self.scenarios for t in self.month_to_week_indices[self.scenario_mois_dict[j]]
+                                    for i in range(self.num_serre))
+            m.addConstr(obj==(1/n)*gp.quicksum(CA_expr[i]-CV_expr[i] for i in range(n)))
+            self.get_assets()
+            m.update()
+            m.setObjective(obj, GRB.MAXIMIZE)
+            m.optimize()
+            # print("Value of robust solution:", obj.getValue())
+           
+            print(f"Value of robust solution: {m.ObjVal:g}")
+            # Your optimization code here, accessing variables inherited from DataProcessor
+            scenario_chosen, semaines_chosen = [], []
+            if m.status == GRB.Status.OPTIMAL:
+                # Get selected variables with value == 1
+                list_var = [v.varName for v in m.getVars() if v.x == 1]
+
+            for i in list_var:
+                if int(i.split("_")[4])==0:
+                    scenario_chosen.append(int(i.split("_")[2]))
+                    semaines_chosen.append(int(i.split("_")[3]))
+            
+            print(scenario_chosen)
+            print(semaines_chosen)
+
+            
+# Define the start date  
+        except gp.GurobiError as e:
+            print(f"Error code {e.errno}: {e}")
+        except AttributeError as e:
+            print("Encountered an attribute error")
+            print(e)
